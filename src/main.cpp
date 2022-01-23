@@ -215,14 +215,34 @@ void send_sirc_code(uint8_t cmd)
   // At this point we assume that we finished receiving already.
   BSET(GTCCR, PSR10);
   OCR0A = TCNT0 + SonySHigh;
-  PL(OUTPUT_PIN);
+  if (SEND_MODULATED) {
+    PH(OUTPUT_PIN);
+  } else {
+    PL(OUTPUT_PIN);
+  }
+
   BSET(TIFR0 , OCF0A);  // Clear interrupt flag so it doesn't fire immediately (it's cleared by writing 1)
   g_send_bit = 0x80;
   send_data[0] = cmd & 0x7F;
   send_data[1] = (cmd & 0x80) ? 0xAD : 0x9D;
   send_data[2] = (cmd & 0x80) ? 0x0D : 0x04;
   BSET(TIMSK0, OCIE0A);
-  loop_until_bit_is_clear(TIMSK0, OCIE0A);  // Wait for sending to finish
+#if SEND_MODULATED
+  #define DUTY 0.25
+  while (bit_is_set(TIMSK0, OCIE0A)) {
+    // Bang out the carrier wave using the CPU
+    // The wave is rough and glitchy, but it's good enough (the receiver cares little about the exact frequency)
+    _delay_us(DUTY * 1e6 / 40000);
+    PL(OUTPUT_PIN);
+    _delay_us((1 - DUTY) * 1e6 / 40000);
+    PH(OUTPUT_PIN);
+  }
+
+  PL(OUTPUT_PIN);
+  BSET(DDRB, OUTPUT_PIN);
+#else
+  loop_until_bit_is_clear(TIMSK0, OCIE0A);
+#endif
 }
 
 // IR send bitbang routine
@@ -232,7 +252,12 @@ ISR(TIM0_COMPA_vect)
   uint8_t current = TCNT0;
   if (bit_is_set(g_send_bit, 7)) {
     // Switch output off
-    PH(OUTPUT_PIN);
+    if (SEND_MODULATED) {
+      BCLR(DDRB, OUTPUT_PIN);
+    } else {
+      PH(OUTPUT_PIN);
+    }
+
     BCLR(g_send_bit, 7);
 #ifdef PASSTHROUGH_ENABLED
     if (g_send_bit >= 20) {
@@ -256,7 +281,11 @@ ISR(TIM0_COMPA_vect)
     }
 
     // Bang out next bit
-    PL(OUTPUT_PIN);
+    if (SEND_MODULATED) {
+      BSET(DDRB, OUTPUT_PIN);
+    } else {
+      PL(OUTPUT_PIN);
+    }
     uint8_t send_i = send_bit / 8;
     if (send_data[send_i] & 1) {
       OCR0A = current + Sony1High;
@@ -386,7 +415,7 @@ int main(void)
 #endif
   // Set up pins
   DDRB    = _BV(OUTPUT_ACTIVE) | _BV(OUTPUT_PIN);
-  PORTB   = _BV(OUTPUT_ACTIVE) | _BV(OUTPUT_PIN) | _BV(IR_OUT);
+  PORTB   = _BV(OUTPUT_ACTIVE) | _BV(IR_OUT) | (SEND_MODULATED ? 0 : _BV(OUTPUT_PIN));
   // Disable ADC (it's not used) to save power
   BSET(PRR, PRADC);
   // Set up timer
@@ -404,6 +433,7 @@ int main(void)
   while (1) {
     uint8_t status = g_status;
     if (status & (STATUS_RX_COMPLETE | STATUS_RX_ERROR)) {
+      g_status = 0;
       if (!(status & STATUS_RX_ERROR)) {
         adjust_oscillator(g_rc6_2t_meas);
         uint8_t addr = g_data_received >> 8;
@@ -425,9 +455,9 @@ int main(void)
 
           if (!stop_sending) {
             uint8_t ps2_code = code_lookup(cmd, status);
+            PH(OUTPUT_ACTIVE);
             if (ps2_code != 0xFF) {
-              PH(OUTPUT_ACTIVE);
-              _delay_ms(1);
+              _delay_ms(SEND_MODULATED ? 10 : 1);
               for (int i = 0; i < 3; i++) { // PS2 expects the same message sent 3 times
                 send_sirc_code(ps2_code);
                 _delay_ms(SIRC_REPEAT_DELAY);
@@ -439,10 +469,11 @@ int main(void)
         }
       }
 
-      g_status = 0;
-      if (bit_is_clear(TIMSK0, OCIE0B)) {
-        sleep_mode();
+      if (g_status) {
+        _delay_ms(35);
       }
+    } else if (bit_is_clear(TIMSK0, OCIE0B)) {
+      sleep_mode();
     }
   }
 }

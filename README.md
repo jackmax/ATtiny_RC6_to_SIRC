@@ -29,8 +29,6 @@ Code space was probably the biggest problem, next to having only one timer. In t
 
 The program uses the single timer on the ATtiny for both receiving and sending in such a way to make it possible to receive and send simultaneously.
 
-Sending a modulated SIRC signal would be tricky with just one timer and so limited code space. Perhaps you could use the CPU to bang out the carrier wave and the timer interrupt to connect and disconnect it.
-
 ## Why
 I'm to lazy to get out of bed and press the power button on my PS2. Also, because OPL supports Bluetooth controllers now, I needed some way to select the game I want to play.without using the wired controller. I have a lot of ATtiny13-s so I decided to take one and make it befriend the PS2 :)
 

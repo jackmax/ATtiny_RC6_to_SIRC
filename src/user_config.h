@@ -67,3 +67,7 @@
 // Messages should be sent in a 45 ms raster. We can't do it exactly, because the delay at the end
 // should depend on the contents of the message. This is a conservative estimate based on average message length.
 #define SIRC_REPEAT_DELAY 25
+
+// Set this to 1 to send a modulated signal to control an infrared LED.
+// Set to 0 to send a demodulated signal straight to PS2 microcontroller.
+#define SEND_MODULATED 0
